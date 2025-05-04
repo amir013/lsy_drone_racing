@@ -89,10 +89,9 @@ class LinearMPCRacingController(Controller):
             info: Optional additional information.
 
         Returns:
-            The drone state [x, y, z, vx, vy, vz, ax, ay, az, yaw, rrate, prate, yrate] as a numpy array,
-            reshaped to (1, 1, 13) for simulation compatibility.
+            The drone state [x, y, z, vx, vy, vz, ax, ay, az, yaw, rrate, prate, yrate] as a numpy array.
         """
-        # Use either "position" or "pos" as available
+        # Extract current state
         pos = obs.get("position", obs.get("pos"))
         vel = obs.get("velocity", obs.get("vel"))
         yaw = obs.get("yaw", 0.0)
@@ -111,8 +110,7 @@ class LinearMPCRacingController(Controller):
         self.control_history.append(control)
         
         # Compose the full 13-element state vector
-        action = np.concatenate([pos, vel, control, [yaw, rrate, prate, yrate]], dtype=np.float32)
-        return action.reshape(1, 1, 13)
+        return np.concatenate([pos, vel, control, [yaw, rrate, prate, yrate]], dtype=np.float32)
         
     def _get_reference_trajectory(self, current_state: NDArray[np.floating]) -> NDArray[np.floating]:
         """Get reference trajectory for the next N steps."""
@@ -143,44 +141,23 @@ class LinearMPCRacingController(Controller):
         Returns:
             Optimal control input.
         """
-        def cost_function(u):
-            # Reshape control sequence
-            u = u.reshape((self.N, 3))
-            
-            # Simulate system forward
+        def cost(u_flat):
+            u = u_flat.reshape(self.N, 3)
             x = current_state.copy()
-            cost = 0.0
-            
-            for i in range(self.N):
-                # State cost
-                error = x[:3] - ref_trajectory[i]
-                cost += error.T @ self.Q[:3, :3] @ error
-                
-                # Control cost
-                cost += u[i].T @ self.R @ u[i]
-                
-                # Update state
-                x = self.A @ x + self.B @ u[i]
-            
-            return cost
+            total_cost = 0.0
+            for k in range(self.N):
+                # Predict next state
+                x = self.A @ x + self.B @ u[k]
+                # Reference for this step
+                ref = np.concatenate([ref_trajectory[k], np.zeros(3)])
+                # Cost
+                total_cost += (x - ref).T @ self.Q @ (x - ref) + u[k].T @ self.R @ u[k]
+            return total_cost
         
-        # Initial guess for control sequence
-        u0 = np.zeros(self.N * 3)
-        
-        # Bounds on control inputs
-        bounds = [(-2.0, 2.0) for _ in range(self.N * 3)]
-        
-        # Solve optimization problem
-        result = minimize(
-            cost_function,
-            u0,
-            method='SLSQP',
-            bounds=bounds,
-            options={'maxiter': 100}
-        )
-        
-        # Return first control input
-        return result.x[:3]
+        u0 = np.zeros((self.N, 3)).flatten()
+        res = minimize(cost, u0, method="SLSQP")
+        u_opt = res.x.reshape(self.N, 3)
+        return u_opt[0]  # Return only the first control input
         
     def step_callback(
         self,

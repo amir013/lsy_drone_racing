@@ -89,15 +89,11 @@ class LinearMPCRacingController(Controller):
             info: Optional additional information.
 
         Returns:
-            The drone state [x, y, z, vx, vy, vz, ax, ay, az, yaw, rrate, prate, yrate] as a numpy array,
-            reshaped to (1, 1, 13) for simulation compatibility.
+            The control command as a numpy array.
         """
-        # Use either "position" or "pos" as available
-        pos = obs.get("position", obs.get("pos"))
-        vel = obs.get("velocity", obs.get("vel"))
-        yaw = obs.get("yaw", 0.0)
-        rrate = prate = yrate = 0.0
-
+        # Extract current state
+        pos = obs["position"]
+        vel = obs["velocity"]
         state = np.concatenate([pos, vel])
         
         # Get reference trajectory
@@ -110,9 +106,7 @@ class LinearMPCRacingController(Controller):
         self.state_history.append(state)
         self.control_history.append(control)
         
-        # Compose the full 13-element state vector
-        action = np.concatenate([pos, vel, control, [yaw, rrate, prate, yrate]], dtype=np.float32)
-        return action.reshape(1, 1, 13)
+        return control
         
     def _get_reference_trajectory(self, current_state: NDArray[np.floating]) -> NDArray[np.floating]:
         """Get reference trajectory for the next N steps."""
@@ -210,4 +204,4 @@ class LinearMPCRacingController(Controller):
         """Reset the controller's internal state."""
         self.state_history = []
         self.control_history = []
-        self.trajectory = self._generate_trajectory() 
+        self.trajectory = self._generate_trajectory()
